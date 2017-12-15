@@ -6,9 +6,9 @@
 
 ```applescript
 tell application "Google Play Music Desktop Player"
-	if it is running then
-		do shell script "GPMDP_AUTH_KEY=my-auth-key gpmdp pause"
-	end if
+    if it is running then
+        do shell script "GPMDP_AUTH_KEY=my-auth-key gpmdp pause"
+    end if
 end tell
 ```
 
