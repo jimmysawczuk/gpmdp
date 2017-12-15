@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/pkg/errors"
@@ -18,16 +19,14 @@ type writePayload struct {
 	RequestID int           `json:"requestID"`
 }
 
-type writeReturn struct {
+type readPayloadOrWriteReturn struct {
+	Channel string      `json:"channel"`
+	Payload interface{} `json:"payload"`
+
 	Namespace string      `json:"namespace"`
 	Type      string      `json:"type"`
 	Value     interface{} `json:"value"`
 	RequestID int         `json:"requestID"`
-}
-
-type readPayload struct {
-	Channel string      `json:"channel"`
-	Payload interface{} `json:"payload"`
 }
 
 type state struct {
@@ -40,21 +39,33 @@ type state struct {
 	Repeat  string `json:"repeat"`
 	Shuffle string `json:"shuffle"`
 	Time    struct {
-		Current int `json:"current"`
-		Total   int `json:"total"`
+		Current int64 `json:"current"`
+		Total   int64 `json:"total"`
 	} `json:"time"`
 	Track struct {
 		Album  string `json:"album"`
 		Artist string `json:"artist"`
 		Title  string `json:"title"`
 	} `json:"track"`
+	Volume int64 `json:"volume"`
 }
 
 var ws *websocket.Conn
-var requestID = 1
 var playerState state
 
+var stateReady map[string]bool
+var readyCh chan bool
+var stateChangeCh chan bool
+var authCh chan interface{}
+var inittedCh chan bool
+
 func main() {
+	authCh = make(chan interface{})
+	stateChangeCh = make(chan bool)
+	readyCh = make(chan bool)
+	inittedCh = make(chan bool)
+	stateReady = map[string]bool{}
+
 	var err error
 	ws, _, err = websocket.DefaultDialer.Dial("ws://localhost:5672", nil)
 	if err != nil {
@@ -62,7 +73,9 @@ func main() {
 	}
 	defer ws.Close()
 
-	readInitialState()
+	go listen()
+	go waitForInit()
+	<-readyCh
 
 	if auth := os.Getenv("GPMDP_AUTH_KEY"); auth != "" && os.Args[1] != "auth" {
 		authenticate()
@@ -83,6 +96,9 @@ func main() {
 	case "play":
 		err = play()
 
+	case "status":
+		err = status()
+
 	case "toggleshuffle":
 		err = toggleShuffle()
 
@@ -97,40 +113,82 @@ func main() {
 	}
 }
 
-func readInitialState() error {
-	tempState := map[string]interface{}{}
-
+func listen() error {
 	for {
-		target := readPayload{}
+		var target readPayloadOrWriteReturn
 		err := ws.ReadJSON(&target)
 		if err != nil {
-			break
+			log.Printf("listen err: %s", err)
+			os.Exit(2)
+			return err
+		}
+
+		switch target.Namespace {
+		case "result":
+			stateChangeCh <- true
+			continue
 		}
 
 		switch target.Channel {
-		case "library", "lyrics", "search-results", "settings:theme", "settings:themeColor", "settings:themeType":
-			// do nothing for these
+		case "API_VERSION":
+			marshalData(&playerState.APIVersion, target.Payload)
+			stateReady[target.Channel] = true
+			readyCh <- true
+
+		case "playState":
+			marshalData(&playerState.PlayState, target.Payload)
+			stateReady[target.Channel] = true
+
+		case "volume":
+			marshalData(&playerState.Volume, target.Payload)
+			stateReady[target.Channel] = true
+
+		case "shuffle":
+			marshalData(&playerState.Shuffle, target.Payload)
+			stateReady[target.Channel] = true
+
+		case "repeat":
+			marshalData(&playerState.Repeat, target.Payload)
+			stateReady[target.Channel] = true
+
+		case "track":
+			marshalData(&playerState.Track, target.Payload)
+			stateReady[target.Channel] = true
+
+		case "rating":
+			marshalData(&playerState.Rating, target.Payload)
+			stateReady[target.Channel] = true
+
+		case "time":
+			marshalData(&playerState.Time, target.Payload)
+			stateReady[target.Channel] = true
+
+		case "library", "lyrics", "playlists", "queue", "search-results", "settings:theme", "settings:themeColor", "settings:themeType":
+			continue
+
+		case "connect":
+			authCh <- target.Payload
+
 		default:
-			tempState[target.Channel] = target.Payload
-		}
-
-		if target.Channel == "library" {
-			break
+			log.Println("unhandled channel:", target.Channel)
+			continue
 		}
 	}
+}
 
+func waitForInit() {
+	for len(stateReady) < 8 {
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	inittedCh <- true
+	close(inittedCh)
+}
+
+func marshalData(dst interface{}, src interface{}) {
 	buf := &bytes.Buffer{}
-	err := json.NewEncoder(buf).Encode(tempState)
-	if err != nil {
-		return errors.Wrap(err, "read initial state")
-	}
-
-	err = json.NewDecoder(buf).Decode(&playerState)
-	if err != nil {
-		return errors.Wrap(err, "read initial state")
-	}
-
-	return nil
+	json.NewEncoder(buf).Encode(src)
+	json.NewDecoder(buf).Decode(dst)
 }
 
 func setupAuth() error {
@@ -138,17 +196,12 @@ func setupAuth() error {
 		Namespace: "connect",
 		Method:    "connect",
 		Arguments: []interface{}{"Applescript Invoker"},
-		RequestID: 1,
 	})
 	if err != nil {
 		return errors.Wrap(err, "auth: connect")
 	}
 
-	authResponse := readPayload{}
-	err = ws.ReadJSON(&authResponse)
-	if err != nil {
-		return errors.Wrap(err, "auth: handshake response")
-	}
+	authResponse := <-authCh
 
 	pin := ""
 	fmt.Printf("Enter a PIN: ")
@@ -161,21 +214,21 @@ func setupAuth() error {
 		Namespace: "connect",
 		Method:    "connect",
 		Arguments: []interface{}{"Applescript Invoker", pin},
+		RequestID: 2,
 	})
 
-	err = ws.ReadJSON(&authResponse)
-	if err != nil {
-		return errors.Wrap(err, "auth: read pin response")
+	authResponse = <-authCh
+	resp, ok := authResponse.(string)
+	if !ok {
+		return errors.Errorf("invalid response received: %v", authResponse)
 	}
 
-	payload := authResponse.Payload.(string)
-
-	if payload == "CODE_REQUIRED" {
-		return errors.Wrap(errors.New("bad pin"), "auth")
+	if resp == "CODE_REQUIRED" {
+		return errors.New("invalid PIN entered")
 	}
 
-	fmt.Println("GPMDP_AUTH_KEY=" + payload)
-	os.Setenv("GPMDP_AUTH_KEY", payload)
+	fmt.Println("GPMDP_AUTH_KEY=" + resp)
+	os.Setenv("GPMDP_AUTH_KEY", resp)
 
 	return nil
 }
@@ -185,6 +238,7 @@ func authenticate() error {
 		Namespace: "connect",
 		Method:    "connect",
 		Arguments: []interface{}{"Applescript Invoker", os.Getenv("GPMDP_AUTH_KEY")},
+		RequestID: 1,
 	})
 	if err != nil {
 		return errors.Wrap(err, "authenticate: connect")
@@ -230,11 +284,7 @@ func togglePlayState() error {
 		return errors.Wrap(err, "togglePlayState")
 	}
 
-	target := writeReturn{}
-	err = ws.ReadJSON(&target)
-	if err != nil {
-		return errors.Wrap(err, "togglePlayState")
-	}
+	<-stateChangeCh
 
 	return nil
 }
@@ -250,12 +300,32 @@ func toggleShuffle() error {
 		return errors.Wrap(err, "toggleShuffle")
 	}
 
-	target := writeReturn{}
-	err = ws.ReadJSON(&target)
-	if err != nil {
-		return errors.Wrap(err, "toggleShuffle")
+	<-stateChangeCh
+
+	return nil
+}
+
+func status() error {
+	if res, ok := <-inittedCh; !res && ok {
+		return errors.New("never initted")
 	}
 
+	if playerState.PlayState {
+		fmt.Printf(`Currently playing:
+	Track: %s
+	Artist: %s
+	Album: %s
+	Time: %s / %s
+`,
+			playerState.Track.Title,
+			playerState.Track.Artist,
+			playerState.Track.Album,
+			time.Duration(playerState.Time.Current*1e6),
+			time.Duration(playerState.Time.Total*1e6),
+		)
+	} else {
+		fmt.Println("Playback paused")
+	}
 	return nil
 }
 
@@ -265,6 +335,7 @@ func usage() {
 	fmt.Println("  auth: authenticates app so it can control GPMDP")
 	fmt.Println("  pause: pauses playback")
 	fmt.Println("  play: resumes playback")
+	fmt.Println("  status: shows currently playing track")
 	fmt.Println("  toggleshuffle: toggles shuffle mode")
 	fmt.Println("")
 }
