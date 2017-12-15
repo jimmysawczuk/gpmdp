@@ -26,6 +26,6 @@ Then start up Google Play Music Desktop Player, and run:
 $ gpmdp auth
 ```
 
-Enter the PIN as prompted, then copy the provided authentication key. It's used as an environment variable by gpmdp, so you can either store this in your `.bashrc`/`.zshrc` or prefix any commands you want to run with it, i.e. `GPMDP\_AUTH_KEY=my-auth-key gpmdp pause`.
+Enter the PIN as prompted, then copy the provided authentication key. It's used as an environment variable by gpmdp, so you can either store this in your `.bashrc`/`.zshrc` or prefix any commands you want to run with it, i.e. `GPMDP_AUTH_KEY=my-auth-key gpmdp pause`.
 
 Finally, you can run `gpmdp play`, `gpmdp pause`, `gpmdp toggleshuffle` or `gpmdp status`, all of which should be self explanatory. Running `gpmdp help` shows a usage screen.
