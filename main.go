@@ -102,6 +102,15 @@ func main() {
 	case "toggleshuffle":
 		err = toggleShuffle()
 
+	case "togglerepeat":
+		err = toggleRepeat()
+
+	case "next":
+		err = next()
+
+	case "prev":
+		err = prev()
+
 	default:
 		err = errors.New("invalid subcommand:" + os.Args[1])
 	}
@@ -305,6 +314,54 @@ func toggleShuffle() error {
 	return nil
 }
 
+func toggleRepeat() error {
+	err := ws.WriteJSON(writePayload{
+		Namespace: "playback",
+		Method:    "toggleRepeat",
+		Arguments: []interface{}{},
+		RequestID: 2,
+	})
+	if err != nil {
+		return errors.Wrap(err, "toggleRepeat")
+	}
+
+	<-stateChangeCh
+
+	return nil
+}
+
+func prev() error {
+	err := ws.WriteJSON(writePayload{
+		Namespace: "playback",
+		Method:    "rewind",
+		Arguments: []interface{}{},
+		RequestID: 2,
+	})
+	if err != nil {
+		return errors.Wrap(err, "prev")
+	}
+
+	<-stateChangeCh
+
+	return nil
+}
+
+func next() error {
+	err := ws.WriteJSON(writePayload{
+		Namespace: "playback",
+		Method:    "forward",
+		Arguments: []interface{}{},
+		RequestID: 2,
+	})
+	if err != nil {
+		return errors.Wrap(err, "next")
+	}
+
+	<-stateChangeCh
+
+	return nil
+}
+
 func status() error {
 	if res, ok := <-inittedCh; !res && ok {
 		return errors.New("never initted")
@@ -333,9 +390,12 @@ func usage() {
 	fmt.Println("Usage: gpmdp <command>")
 	fmt.Println("Available commands:")
 	fmt.Println("  auth: authenticates app so it can control GPMDP")
+	fmt.Println("  next: advance to the next song")
 	fmt.Println("  pause: pauses playback")
 	fmt.Println("  play: resumes playback")
+	fmt.Println("  prev: return to the previous song")
 	fmt.Println("  status: shows currently playing track")
+	fmt.Println("  togglerepeat: toggles repeat mode")
 	fmt.Println("  toggleshuffle: toggles shuffle mode")
 	fmt.Println("")
 }
