@@ -14,11 +14,17 @@ end tell
 
 ## Usage
 
-Install gpmdp using Go get:
-
+In order to install `gpmdp`, you first need to get the source code:
 ```bash
 $ go get github.com/jimmysawczuk/gpmdp
 ```
+
+Once downloaded, change into the source directory and compile `gpmdp`.
+```bash
+$ cd $GOPATH/src/github.com/jimmysawczuk/gpmdp
+$ go install
+```
+This will install the `gpmdp` binary into `$GOPATH/bin`, so you may need to add this directory to your `$PATH`, or copy the binary into a standard location. 
 
 Then start up Google Play Music Desktop Player, and run:
 
