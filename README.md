@@ -12,21 +12,29 @@ tell application "Google Play Music Desktop Player"
 end tell
 ```
 
-## Usage
+## Installing a premade binary
 
-In order to install `gpmdp`, you first need to get the source code:
+Download the [relevant pre-compiled binary](https://github.com/jimmysawczuk/gpmdp/releases) for your system and copy it to a directory in your `$PATH`.
+
+## Installing from source
+
+You can install `gpmdp` using `go get` or by cloning it yourself. Via `go get`:
 ```bash
 $ go get github.com/jimmysawczuk/gpmdp
 ```
 
-Once downloaded, change into the source directory and compile `gpmdp`.
+Or, if you prefer to clone it yourself:
 ```bash
+$ git clone https://github.com/jimmysawczuk/gpmdp.git $GOPATH/src/github.com/jimmysawczuk/gpmdp
 $ cd $GOPATH/src/github.com/jimmysawczuk/gpmdp
 $ go install
 ```
-This will install the `gpmdp` binary into `$GOPATH/bin`, so you may need to add this directory to your `$PATH`, or copy the binary into a standard location. 
 
-Then start up Google Play Music Desktop Player, and run:
+You may need to add this directory to your `$PATH`, or copy the binary into a standard location.
+
+## Usage
+
+Start up Google Play Music Desktop Player, and run:
 
 ```
 $ gpmdp auth
